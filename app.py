@@ -3,6 +3,8 @@
 FOOTLENS 3.0 — Football Injury Intelligence Platform
 Run with:  streamlit run app.py
 Needs footlens_cleaned_injuries.csv beside this file (or upload one in the sidebar).
+Any file named footlens_cleaned_injuries*.csv beside this file is also picked up
+(for example footlens_cleaned_injuries__2_.csv).
 """
 
 import hashlib
@@ -11,6 +13,7 @@ import inspect
 import re
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import quote
 
 import numpy as np
@@ -34,6 +37,48 @@ st.set_page_config(
 # Rows without an injury date are kept unless the person narrows the date range.
 # Set to False to restore the original behaviour (undated rows always dropped).
 KEEP_UNDATED_RECORDS = True
+
+# ==========================================================
+# DATASET SCHEMA COMPATIBILITY
+# ==========================================================
+
+CSV_NAME = "footlens_cleaned_injuries.csv"
+
+# Column names used by the newer CSV export  ->  names the app works with internally.
+# A rename only happens when the internal name is not already present, so files that
+# use the original column names keep working unchanged.
+COLUMN_ALIASES = {
+    "Player_Name": "Name",
+    "Club_Name": "Team Name",
+    "FIFA_Rating": "FIFA rating",
+    "Recovery_Duration_Days": "Recovery_Days",
+    "Pre_Injury_Performance": "Avg_Pre_Injury_Rating",
+    "Post_Injury_Performance": "Avg_Post_Injury_Rating",
+    "Performance_Delta": "Performance_Change",
+    "Matches_Missed_Count": "Absence_Matches_Recorded",
+    "Team_Wins_During_Absence": "Wins_During_Absence",
+    "Team_Points_During_Absence": "Points_During_Absence",
+    "Team_Avg_Goal_Difference": "Avg_GD_During_Absence",
+}
+
+
+def find_default_csv():
+    """Exact file name first, then any footlens_cleaned_injuries*.csv beside app.py / in the cwd."""
+    bases = []
+    try:
+        bases.append(Path(__file__).resolve().parent)
+    except NameError:
+        pass
+    bases.append(Path.cwd())
+    for base in bases:
+        exact = base / CSV_NAME
+        if exact.exists():
+            return str(exact)
+        matches = sorted(base.glob("footlens_cleaned_injuries*.csv"))
+        if matches:
+            return str(matches[0])
+    return CSV_NAME
+
 
 # ==========================================================
 # DESIGN TOKENS
@@ -763,11 +808,26 @@ HELPER_COLS = [
 @st.cache_data(show_spinner=False)
 def load_dataset(raw_bytes=None):
     if raw_bytes is None:
-        data = pd.read_csv("footlens_cleaned_injuries.csv")
+        data = pd.read_csv(find_default_csv())
     else:
         data = pd.read_csv(BytesIO(raw_bytes))
 
     data.columns = [str(c).strip() for c in data.columns]
+
+    # ---- map the CSV's column names onto the names the app uses ----
+    rename = {
+        old: new for old, new in COLUMN_ALIASES.items()
+        if old in data.columns and new not in data.columns
+    }
+    if rename:
+        data = data.rename(columns=rename)
+
+    # Recovery may arrive as text such as "65 days" -> keep just the number.
+    if "Recovery_Days" in data.columns and not pd.api.types.is_numeric_dtype(data["Recovery_Days"]):
+        data["Recovery_Days"] = (
+            data["Recovery_Days"].astype("string")
+            .str.extract(r"(-?\d+(?:\.\d+)?)", expand=False)
+        )
 
     for col in ["Name", "Team Name", "Position", "Season", "Injury"]:
         if col in data.columns:
@@ -790,7 +850,10 @@ def load_dataset(raw_bytes=None):
     ]
     for col in set(numeric_cols):
         if col in data.columns:
-            data[col] = pd.to_numeric(data[col], errors="coerce")
+            num = pd.to_numeric(data[col], errors="coerce")
+            if pd.api.types.is_extension_array_dtype(num):
+                num = num.astype("float64")  # nullable Int64 -> plain float (NaN for gaps)
+            data[col] = num
 
     before_cols = [c for c in data.columns if "_before_injury_GD" in c]
     if before_cols:
@@ -2581,7 +2644,7 @@ if date_range is not None and "Date of Injury" in filtered.columns:
 
 started = st.session_state.get("session_start")
 since = f"Session since {started:%H:%M}" if started else "Session active"
-source = "Uploaded file" if uploaded is not None else "footlens_cleaned_injuries.csv"
+source = "Uploaded file" if uploaded is not None else Path(find_default_csv()).name
 status_slot.markdown(H(f"""
     <div class="status"><div class="dot"></div><div><b>Dataset ready</b>
     <span>{len(filtered):,} of {len(df):,} records · {esc(since)}</span></div></div>
