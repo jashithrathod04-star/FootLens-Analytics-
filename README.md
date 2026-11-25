@@ -6,7 +6,7 @@
 
 <img src="assets/footlens-ticker.svg" alt="Rotating FootLens taglines" width="100%"/>
 
-![Streamlit](https://img.shields.io/badge/https://aqtnempbf732rathodjas.streamlit.app/)
+![Streamlit](https://img.shields.io/badge/Streamlit-app-22d3ee?style=for-the-badge&labelColor=050912)
 ![Plotly](https://img.shields.io/badge/Plotly-charts-9b7bff?style=for-the-badge&labelColor=050912)
 ![Pandas](https://img.shields.io/badge/Pandas-data-2ef2a0?style=for-the-badge&labelColor=050912)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-ffb454?style=for-the-badge&labelColor=050912)
